@@ -25,6 +25,7 @@ export function SingleSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
   const [mode, setMode] = useState<Extract<GameMode, 'classic' | 'endless' | 'speed'>>('classic')
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
   const [mapKey, setMapKey] = useState<string>('default')
+  const [powerFood, setPowerFood] = useState(true)
 
   // 无尽穿墙模式不提供空旷场地（默认场地与空旷平原），须选择有障碍的预设或自定义地图
   const changeMode = (next: Extract<GameMode, 'classic' | 'endless' | 'speed'>): void => {
@@ -49,7 +50,7 @@ export function SingleSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
     audio.click()
     // 使用预设直接游玩；自定义地图以副本形式引用原始数据
     const map = selectedMap ? (selectedMap.readonly ? clonePreset(selectedMap) : selectedMap) : null
-    const config = buildSingleConfig({ mode, difficulty, map })
+    const config = buildSingleConfig({ mode, difficulty, map, powerFood })
     if (selectedMap?.readonly) config.meta = { ...config.meta, mapId: undefined, mapName: selectedMap.name }
     onLaunch(config, { kind: 'single', onExit })
   }
@@ -83,6 +84,9 @@ export function SingleSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
               {d.label}
             </button>
           ))}
+          <button className={`chip ${powerFood ? 'chip-active' : ''}`} onClick={() => setPowerFood((v) => !v)} title="黄金果（30分）与功能果（加速/缩短/幽灵）">
+            {powerFood ? '✨ 特殊食物 开' : '✨ 特殊食物 关'}
+          </button>
         </div>
       </section>
 

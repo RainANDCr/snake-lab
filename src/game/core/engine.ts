@@ -9,6 +9,7 @@ import {
   DeathCause,
   Direction,
   FoodItem,
+  FoodKind,
   GameEvent,
   GameState,
   MatchConfig,
@@ -37,7 +38,10 @@ export function createSnakeBody(spawn: Position, direction: Direction, length: n
 
 export function createInitialState(config: MatchConfig): GameState {
   const snakes: SnakeState[] = config.snakes.map((init) => {
-    const body = createSnakeBody(init.spawn, init.direction, init.length)
+    const body =
+      init.bodyCells && init.bodyCells.length > 0
+        ? init.bodyCells.map((p) => ({ ...p }))
+        : createSnakeBody(init.spawn, init.direction, init.length)
     if (config.wrap) {
       // 穿墙模式：出生身体向后延伸可能越过边界，回绕到场内坐标
       for (const p of body) {
@@ -58,7 +62,8 @@ export function createInitialState(config: MatchConfig): GameState {
       score: 0,
       foodEaten: 0,
       controller: init.controller,
-      shield: 0,
+      shield: init.shield ?? 0,
+      ghostTicks: init.ghostTicks ?? 0,
       speedMult: 1,
       speedTicks: 0,
       scoreMult: 1,
@@ -76,7 +81,7 @@ export function createInitialState(config: MatchConfig): GameState {
     foods: [],
     powerups: [],
     nextItemId: 1,
-    rngSeed: 0x2f6e2b1,
+    rngSeed: config.seed ?? 0x2f6e2b1,
     effectiveTickMs: config.tickMs,
     result: null,
   }
@@ -190,24 +195,34 @@ export function reachableFreeCells(state: GameState): Position[] {
   return out
 }
 
-/** 生成一个食物；无合法位置时返回 false（棋盘已满） */
+const POWER_FOOD_KINDS: FoodKind[] = ['haste', 'shrink', 'ghost']
+
+const FOOD_KIND_VALUES: Record<Exclude<FoodKind, 'normal'>, { value: number; growth: number }> = {
+  golden: { value: 30, growth: 2 },
+  haste: { value: 15, growth: 1 },
+  shrink: { value: 20, growth: 0 },
+  ghost: { value: 15, growth: 1 },
+}
+
+/** 生成一个食物；无合法位置时返回 false（棋盘已满）。按 foodRules 掷出特殊种类 */
 function spawnFood(state: GameState): boolean {
   const candidates = reachableFreeCells(state)
   if (candidates.length === 0) return false
   const cfg = state.config
-  const special = cfg.specialFood && nextRandom(state) < cfg.specialFood.chance
   const idx = Math.floor(nextRandom(state) * candidates.length) % candidates.length
   const pos = candidates[idx]
-  const item: FoodItem = special
-    ? {
-        id: state.nextItemId++,
-        position: pos,
-        value: cfg.specialFood!.value,
-        growth: cfg.specialFood!.growth,
-        kind: 'special',
-      }
-    : { id: state.nextItemId++, position: pos, value: cfg.foodValue, growth: cfg.foodGrowth, kind: 'normal' }
-  state.foods.push(item)
+  let kind: FoodKind = 'normal'
+  const rules = cfg.foodRules
+  if (rules) {
+    const roll = nextRandom(state)
+    if (roll < rules.goldenChance) {
+      kind = 'golden'
+    } else if (roll < rules.goldenChance + rules.powerChance) {
+      kind = POWER_FOOD_KINDS[Math.floor(nextRandom(state) * POWER_FOOD_KINDS.length) % POWER_FOOD_KINDS.length]
+    }
+  }
+  const spec = kind === 'normal' ? { value: cfg.foodValue, growth: cfg.foodGrowth } : FOOD_KIND_VALUES[kind]
+  state.foods.push({ id: state.nextItemId++, position: pos, value: spec.value, growth: spec.growth, kind })
   return true
 }
 
@@ -354,49 +369,55 @@ export function stepGame(prev: GameState): { next: GameState; events: GameEvent[
     for (const [, group] of byCell) {
       if (group.length >= 2) {
         for (const it of group) {
+          // 幽灵形态可以穿过蛇头，不受蛇头相撞影响
+          if (it.snake.ghostTicks > 0) continue
           if (resolveFatal(it, 'head-on')) changed = true
         }
       }
     }
     // 蛇头互换位置
     for (const a of active) {
-      if (dead.has(a.snake.id) || stayers.has(a.snake.id)) continue
+      if (dead.has(a.snake.id) || stayers.has(a.snake.id) || a.snake.ghostTicks > 0) continue
       for (const b of active) {
-        if (a === b || dead.has(b.snake.id) || stayers.has(b.snake.id)) continue
+        if (a === b || dead.has(b.snake.id) || stayers.has(b.snake.id) || b.snake.ghostTicks > 0) continue
         if (keyOf(a.head) === keyOf(b.snake.body[0]) && keyOf(b.head) === keyOf(a.snake.body[0])) {
           if (resolveFatal(a, 'swap')) changed = true
           if (resolveFatal(b, 'swap')) changed = true
         }
       }
     }
-    // 撞墙 / 撞身体
+    // 撞墙 / 撞身体（幽灵可穿过身体，但墙壁仍然致命）
     for (const it of active) {
       if (dead.has(it.snake.id) || stayers.has(it.snake.id)) continue
-      const fatal = it.wallHit || next.wallSet.has(keyOf(it.head)) || occ.has(keyOf(it.head))
-      if (fatal) {
-        const cause: DeathCause = it.wallHit || next.wallSet.has(keyOf(it.head)) ? 'wall' : 'body'
+      const wallFatal = it.wallHit || next.wallSet.has(keyOf(it.head))
+      const bodyFatal = it.snake.ghostTicks <= 0 && occ.has(keyOf(it.head))
+      if (wallFatal || bodyFatal) {
+        const cause: DeathCause = wallFatal ? 'wall' : 'body'
         if (resolveFatal(it, cause)) changed = true
       }
     }
     if (!changed) break
   }
-  // 收敛兜底：仍有致命移动的蛇直接判负（护盾机会已给过）
+  // 收敛兜底：仍有致命移动的蛇直接判负（护盾机会已给过；幽灵免身体碰撞）
   {
     const occ = buildOccupancy(next, moverIds, stayers, dead, grows)
     const active = intents.filter((i) => !stayers.has(i.snake.id) && !dead.has(i.snake.id))
     for (const it of active) {
-      if (it.wallHit || next.wallSet.has(keyOf(it.head)) || occ.has(keyOf(it.head))) dead.add(it.snake.id)
+      if (it.wallHit || next.wallSet.has(keyOf(it.head)) || (it.snake.ghostTicks <= 0 && occ.has(keyOf(it.head)))) dead.add(it.snake.id)
+      if (it.snake.ghostTicks > 0) continue
       for (const b of active) {
-        if (it === b) continue
+        if (it === b || b.snake.ghostTicks > 0) continue
         if (keyOf(it.head) === keyOf(b.snake.body[0]) && keyOf(b.head) === keyOf(it.snake.body[0])) dead.add(it.snake.id)
       }
     }
     const byCell = new Map<string, number>()
     for (const it of active) {
+      if (it.snake.ghostTicks > 0) continue
       const k = keyOf(it.head)
       byCell.set(k, (byCell.get(k) ?? 0) + 1)
     }
     for (const it of active) {
+      if (it.snake.ghostTicks > 0) continue
       if ((byCell.get(keyOf(it.head)) ?? 0) >= 2) dead.add(it.snake.id)
     }
   }
@@ -432,11 +453,17 @@ export function stepGame(prev: GameState): { next: GameState; events: GameEvent[
     const f = foodAt.get(keyOf(it.head))
     if (f) {
       next.foods = next.foods.filter((x) => x.id !== f.id)
-      const gained = Math.round(f.value * s.scoreMult)
+      const gained = Math.round(f.value * s.scoreMult * (next.config.scoreMultiplier ?? 1))
       s.score += gained
       s.foodEaten += 1
       s.pendingGrowth += f.growth
-      events.push({ type: 'food_eaten', snakeId: s.id, score: s.score, value: f.value })
+      if (f.kind === 'haste') {
+        s.speedMult = 1.4
+        s.speedTicks = Math.max(s.speedTicks, 45)
+      } else if (f.kind === 'ghost') {
+        s.ghostTicks = Math.max(s.ghostTicks, 80)
+      }
+      events.push({ type: 'food_eaten', snakeId: s.id, score: s.score, value: f.value, kind: f.kind })
       events.push({ type: 'score_changed', snakeId: s.id, score: s.score })
     }
     const p = powerupAt.get(keyOf(it.head))
@@ -446,6 +473,12 @@ export function stepGame(prev: GameState): { next: GameState; events: GameEvent[
     }
     if (s.pendingGrowth > 0) s.pendingGrowth -= 1
     else s.body.pop()
+    if (f?.kind === 'shrink') {
+      // 缩短果：取消待增长并立即剪掉至多 3 节（保留最少 3 节）
+      s.pendingGrowth = 0
+      const cut = Math.min(3, s.body.length - 3)
+      if (cut > 0) s.body.splice(s.body.length - cut, cut)
+    }
   }
 
   // 6. 道具计时衰减
@@ -459,6 +492,7 @@ export function stepGame(prev: GameState): { next: GameState; events: GameEvent[
       s.scoreTicks -= 1
       if (s.scoreTicks === 0) s.scoreMult = 1
     }
+    if (s.ghostTicks > 0) s.ghostTicks -= 1
   }
 
   // 7. 补充食物
@@ -508,7 +542,8 @@ interface GameResultLike {
 function settleOutcome(next: GameState, events: GameEvent[]): void {
   const cfg = next.config
   const alive = next.snakes.filter((s) => s.alive)
-  const isVersus = cfg.mode === 'versus' || cfg.mode === 'versus-timed' || cfg.mode === 'versus-ai'
+  const isVersus =
+    cfg.mode === 'versus' || cfg.mode === 'versus-timed' || cfg.mode === 'versus-ai' || cfg.mode === 'tournament'
   const s0 = next.snakes[0]
 
   // 棋盘被完全占满且无法生成食物 → 单人胜利 / 对比分数

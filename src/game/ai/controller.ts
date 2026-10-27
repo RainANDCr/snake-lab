@@ -7,8 +7,9 @@
 import { freeCells, reachableFreeCells } from '../core/engine'
 import { Direction, GameState, keyOf, Position } from '../core/types'
 import { GridCtx, SearchResult, astarSearch, bfsSearch, deltaToDirection, floodCount } from './pathfinding'
+import { perfectDirection } from './hamilton'
 
-export type Algorithm = 'bfs' | 'astar' | 'safe'
+export type Algorithm = 'bfs' | 'astar' | 'safe' | 'perfect'
 
 export type AiStrategy = 'food' | 'tail' | 'space' | 'none'
 
@@ -119,6 +120,30 @@ export function aiDecide(state: GameState, snakeId: string, algorithm: Algorithm
       viz: { explored: [], frontier: [], path: [] },
     }
   }
+
+  // —— 完美 AI（哈密顿回路）：回路可用时数学上不会死亡；否则回退安全策略 ——
+  if (algorithm === 'perfect') {
+    const t0 = performance.now()
+    const dir = perfectDirection(state.wallSet, state.config.width, state.config.height, snake, state.foods.map((f) => f.position))
+    const ms = performance.now() - t0
+    if (dir) {
+      return {
+        direction: dir,
+        stats: { algorithm, explored: 0, pathLength: 0, ms, strategy: 'food', found: true, message: '哈密顿回路跟随（保证不死）' },
+        viz: { explored: [], frontier: [], path: [] },
+      }
+    }
+    const fallback = aiDecide(state, snakeId, 'safe')
+    return {
+      ...fallback,
+      stats: {
+        ...fallback.stats,
+        algorithm,
+        message: `回路不可用（有墙/未对齐）→ ${fallback.stats.message}`,
+      },
+    }
+  }
+
   const head = snake.body[0]
   const { blocked, ownTail } = buildBlocked(state, snakeId)
   const ctx: GridCtx = {

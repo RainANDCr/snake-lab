@@ -36,9 +36,20 @@ export const ALL_DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right']
 
 export type Difficulty = 'easy' | 'normal' | 'hard'
 
-export type ControllerKind = 'human' | 'bfs' | 'astar' | 'safe'
+export type ControllerKind = 'human' | 'bfs' | 'astar' | 'safe' | 'perfect'
 
-export type GameMode = 'classic' | 'endless' | 'speed' | 'versus' | 'versus-timed' | 'versus-ai' | 'level' | 'custom'
+export type GameMode =
+  | 'classic'
+  | 'endless'
+  | 'speed'
+  | 'versus'
+  | 'versus-timed'
+  | 'versus-ai'
+  | 'tournament'
+  | 'level'
+  | 'custom'
+  | 'daily'
+  | 'campaign'
 
 export type GameStatus = 'ready' | 'countdown' | 'playing' | 'paused' | 'won' | 'lost' | 'draw'
 
@@ -55,6 +66,12 @@ export interface SnakeInit {
   direction: Direction
   length: number
   controller: ControllerKind
+  /** 开局护盾层数（战役增益） */
+  shield?: number
+  /** 开局幽灵 tick 数（战役增益） */
+  ghostTicks?: number
+  /** 精确指定初始身体（如哈密顿对齐出生）；未提供时按直线延伸 */
+  bodyCells?: Position[]
 }
 
 export interface SnakeState {
@@ -75,6 +92,8 @@ export interface SnakeState {
   controller: ControllerKind
   /** 护盾剩余次数 */
   shield: number
+  /** 幽灵形态剩余 tick：可穿过蛇身（不可穿墙） */
+  ghostTicks: number
   /** 速度倍率（道具） */
   speedMult: number
   speedTicks: number
@@ -85,12 +104,20 @@ export interface SnakeState {
   accumulator: number
 }
 
+export type FoodKind = 'normal' | 'golden' | 'haste' | 'shrink' | 'ghost'
+
 export interface FoodItem {
   id: number
   position: Position
   value: number
   growth: number
-  kind: 'normal' | 'special'
+  kind: FoodKind
+}
+
+/** 特殊食物规则：黄金果（高分）与功能果（加速/缩短/幽灵）出现概率 */
+export interface FoodRules {
+  goldenChance: number
+  powerChance: number
 }
 
 export interface PowerupItem {
@@ -135,8 +162,12 @@ export interface MatchConfig {
   foodCount: number
   foodValue: number
   foodGrowth: number
-  /** 特殊食物规则（关卡用） */
-  specialFood?: { chance: number; value: number; growth: number }
+  /** 特殊食物规则（黄金果/功能果）；未提供时只有普通食物 */
+  foodRules?: FoodRules
+  /** 随机种子：决定食物生成序列（每日挑战用）；未提供用固定默认种子 */
+  seed?: number
+  /** 全局得分倍率（战役增益），与道具倍率叠乘 */
+  scoreMultiplier?: number
   /** 基础逻辑步长（毫秒），越小越快 */
   tickMs: number
   speedRamp?: SpeedRamp
@@ -152,6 +183,12 @@ export interface MatchConfig {
     mapName?: string
     /** 对战模式说明 */
     rules?: string[]
+    /** 每日挑战日期键（YYYY-MM-DD） */
+    dailyDate?: string
+    /** 战役当前关数 */
+    campaignStage?: number
+    /** 战役累计总分（结算用） */
+    campaignRunScore?: number
   }
 }
 
@@ -172,7 +209,7 @@ export interface GameEvent {
   cause?: DeathCause
   score?: number
   value?: number
-  kind?: PowerupKind
+  kind?: PowerupKind | FoodKind
   reason?: string
   winnerIds?: string[]
   stars?: number
@@ -216,6 +253,12 @@ export interface GameSummary {
   stars?: number
   versusResult?: 'win' | 'draw' | 'loss'
   controller: ControllerKind
+  /** 观赛局（AI 锦标赛）：只入最近记录，不累计统计 */
+  spectated?: boolean
+  /** 每日挑战日期键 */
+  dailyDate?: string
+  /** 战役通关关数 */
+  campaignStage?: number
   /** 记录时间戳 */
   at?: number
 }

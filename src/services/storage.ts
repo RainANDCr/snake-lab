@@ -72,6 +72,31 @@ export interface CustomLevelDef {
   createdAt: number
 }
 
+export interface DailyState {
+  version: number
+  /** dateKey -> 当日最佳 */
+  days: Record<string, { score: number; at: number }>
+  /** 连续挑战天数 */
+  streak: number
+  lastDate?: string
+}
+
+export function defaultDaily(): DailyState {
+  return { version: 1, days: {}, streak: 0 }
+}
+
+export interface RogueState {
+  version: number
+  runs: number
+  bestScore: number
+  bestStage: number
+  lastBuffs: string[]
+}
+
+export function defaultRogue(): RogueState {
+  return { version: 1, runs: 0, bestScore: 0, bestStage: 0, lastBuffs: [] }
+}
+
 export interface StoredEnvelope<T> {
   version: number
   data: T
@@ -151,6 +176,14 @@ function isLevelProgress(d: unknown): d is LevelProgressState {
 function isCustomLevels(d: unknown): d is CustomLevelDef[] {
   return Array.isArray(d)
 }
+function isDaily(d: unknown): d is DailyState {
+  const s = d as DailyState
+  return typeof s === 'object' && s !== null && typeof s.days === 'object' && typeof s.streak === 'number'
+}
+function isRogue(d: unknown): d is RogueState {
+  const s = d as RogueState
+  return typeof s === 'object' && s !== null && typeof s.runs === 'number' && typeof s.bestScore === 'number' && typeof s.bestStage === 'number'
+}
 
 export const storage = {
   loadSettings(): Settings {
@@ -194,6 +227,24 @@ export const storage = {
   saveCustomLevels(levels: CustomLevelDef[]): boolean {
     return writeStored('customLevels.v1', 1, levels.slice(0, 100))
   },
+  loadDaily(): DailyState {
+    const d = readStored<DailyState>('daily.v1', 1, defaultDaily(), isDaily, {})
+    // 只保留最近 90 天
+    const keys = Object.keys(d.days).sort().reverse()
+    if (keys.length > 90) {
+      for (const k of keys.slice(90)) delete d.days[k]
+    }
+    return d
+  },
+  saveDaily(d: DailyState): boolean {
+    return writeStored('daily.v1', 1, d)
+  },
+  loadRogue(): RogueState {
+    return readStored<RogueState>('rogue.v1', 1, defaultRogue(), isRogue, {})
+  },
+  saveRogue(r: RogueState): boolean {
+    return writeStored('rogue.v1', 1, r)
+  },
 
   /** 导出全部数据为 JSON 字符串（备份） */
   exportAll(): string {
@@ -207,6 +258,8 @@ export const storage = {
         maps: this.loadMaps(),
         levelProgress: this.loadLevelProgress(),
         customLevels: this.loadCustomLevels(),
+        daily: this.loadDaily(),
+        rogue: this.loadRogue(),
       },
       null,
       2,
@@ -236,6 +289,8 @@ export const storage = {
     tryRestore('成就', data.achievements, (v: AchievementsState) => this.saveAchievements({ ...defaultAchievementsState(), ...v }))
     tryRestore('关卡进度', data.levelProgress, (v: LevelProgressState) => this.saveLevelProgress({ ...defaultLevelProgress(), ...v }))
     tryRestore('自定义关卡', data.customLevels, (v: CustomLevelDef[]) => this.saveCustomLevels(v))
+    tryRestore('每日挑战', data.daily, (v: DailyState) => this.saveDaily({ ...defaultDaily(), ...v }))
+    tryRestore('战役', data.rogue, (v: RogueState) => this.saveRogue({ ...defaultRogue(), ...v }))
     if (Array.isArray(data.maps)) {
       const maps = (data.maps as MapData[]).filter((m) => validateMap(m).ok)
       if (this.saveMaps(maps)) restored.push('地图')

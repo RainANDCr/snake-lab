@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Github, Monitor, Moon, Sun } from 'lucide-react'
 import { Difficulty, MatchConfig } from './game/core/types'
 import { LevelDef, getLevel, levelToConfig } from './game/levels/levels'
+import { buildCampaignStageConfig, buildDailyConfig, rollBuffOffers } from './game/modes/configs'
 import { audio } from './services/audio'
 import { Settings, ThemeMode, storage } from './services/storage'
 import { Toast, uiBus } from './services/uiBus'
@@ -16,20 +17,38 @@ import { MapEditorPage } from './features/MapEditorPage'
 import { AchievementsPage } from './features/AchievementsPage'
 import { StatsPage } from './features/StatsPage'
 import { SettingsPage } from './features/SettingsPage'
+import { DailyPage, todayKey } from './features/DailyPage'
+import { TournamentPage } from './features/TournamentPage'
+import { CampaignPage, CampaignRun } from './features/CampaignPage'
 
 type Route =
   | { page: 'home' }
   | { page: 'single-setup' }
   | { page: 'ai-lab' }
+  | { page: 'tournament' }
   | { page: 'versus-setup' }
+  | { page: 'campaign' }
   | { page: 'levels' }
   | { page: 'editor' }
   | { page: 'achievements' }
   | { page: 'stats' }
   | { page: 'settings' }
+  | { page: 'daily' }
   | { page: 'game'; config: MatchConfig; options: GameScreenOptions }
 
-const ENTRIES: HomePageEntry[] = ['single-setup', 'ai-lab', 'versus-setup', 'levels', 'editor', 'achievements', 'stats', 'settings']
+const ENTRIES: HomePageEntry[] = [
+  'single-setup',
+  'daily',
+  'ai-lab',
+  'tournament',
+  'versus-setup',
+  'campaign',
+  'levels',
+  'editor',
+  'achievements',
+  'stats',
+  'settings',
+]
 
 const GITHUB_URL = 'https://github.com/RainANDCr/snake-lab'
 
@@ -54,6 +73,9 @@ export function App() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [settings, setSettings] = useState<Settings>(() => storage.loadSettings())
   const [systemDark, setSystemDark] = useState<boolean>(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true)
+  const [campaignRun, setCampaignRun] = useState<CampaignRun | null>(null)
+  const [buffOffers, setBuffOffers] = useState<string[]>([])
+  const campaignRunRef = useRef<CampaignRun | null>(null)
 
   useEffect(() => {
     const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
@@ -107,6 +129,59 @@ export function App() {
     [],
   )
 
+  /* ---------- Roguelike 战役流程 ---------- */
+  const setRun = useCallback((r: CampaignRun | null) => {
+    campaignRunRef.current = r
+    setCampaignRun(r)
+  }, [])
+
+  const campaignOptions = useCallback((): GameScreenOptions => {
+    return {
+      kind: 'campaign',
+      onExit: () => {
+        setRun(null)
+        setRoute({ page: 'campaign' })
+      },
+      onNextStage: (clearedStage: number, stageScore: number) => {
+        const prev = campaignRunRef.current
+        const next: CampaignRun = {
+          stage: clearedStage + 1,
+          buffs: prev?.buffs ?? [],
+          totalScore: (prev?.totalScore ?? 0) + stageScore,
+        }
+        setRun(next)
+        setBuffOffers(rollBuffOffers(next.buffs))
+        setRoute({ page: 'campaign' })
+      },
+      onRestartCampaign: () => startCampaignRunRef.current(),
+    }
+  }, [setRun])
+
+  const startCampaignRunRef = useRef((): void => {
+    const run: CampaignRun = { stage: 1, buffs: [], totalScore: 0 }
+    setRun(run)
+    setRoute({ page: 'game', config: buildCampaignStageConfig(1, []), options: campaignOptions() })
+  })
+  const startCampaignRun = useCallback((): void => startCampaignRunRef.current(), [campaignOptions])
+
+  const pickBuff = useCallback(
+    (buffId: string) => {
+      const r = campaignRunRef.current
+      if (!r) return
+      const buffs = [...r.buffs, buffId]
+      setRun({ ...r, buffs })
+      audio.click()
+      setRoute({ page: 'game', config: buildCampaignStageConfig(r.stage, buffs), options: campaignOptions() })
+    },
+    [campaignOptions, setRun],
+  )
+
+  const skipBuff = useCallback(() => {
+    const r = campaignRunRef.current
+    if (!r) return
+    setRoute({ page: 'game', config: buildCampaignStageConfig(r.stage, r.buffs), options: campaignOptions() })
+  }, [campaignOptions])
+
   const applySettings = useCallback((next: Settings) => {
     storage.saveSettings(next)
     setSettings(next)
@@ -129,6 +204,11 @@ export function App() {
     settings.themeMode === 'dark' ? <Moon size={15} /> : settings.themeMode === 'light' ? <Sun size={15} /> : <Monitor size={15} />
   const themeLabel = settings.themeMode === 'dark' ? '深色' : settings.themeMode === 'light' ? '浅色' : '跟随系统'
 
+  const playDaily = useCallback(() => {
+    const config = buildDailyConfig(todayKey())
+    setRoute({ page: 'game', config, options: { kind: 'daily', onExit: () => setRoute({ page: 'daily' }) } })
+  }, [])
+
   return (
     <div className="app">
       <div className="quick-bar">
@@ -145,12 +225,28 @@ export function App() {
       {route.page === 'home' && <HomePage onNavigate={(entry) => navigate(entry)} entries={ENTRIES} />}
       {route.page === 'single-setup' && <SingleSetupPage onExit={() => navigate('home')} onLaunch={launchGame} />}
       {route.page === 'ai-lab' && <AiLabPage onExit={() => navigate('home')} onLaunch={launchGame} />}
+      {route.page === 'tournament' && <TournamentPage onExit={() => navigate('home')} onLaunch={launchGame} />}
       {route.page === 'versus-setup' && <VersusSetupPage onExit={() => navigate('home')} onLaunch={launchGame} />}
+      {route.page === 'campaign' && (
+        <CampaignPage
+          onExit={() => navigate('home')}
+          onStartRun={startCampaignRun}
+          run={campaignRun}
+          offers={buffOffers}
+          onPickBuff={pickBuff}
+          onSkipBuff={skipBuff}
+          onAbandon={() => {
+            setRun(null)
+            setRoute({ page: 'campaign' })
+          }}
+        />
+      )}
       {route.page === 'levels' && <LevelsPage onExit={() => navigate('home')} onPlay={playLevel} />}
       {route.page === 'editor' && <MapEditorPage onExit={() => navigate('home')} onLaunch={launchGame} />}
       {route.page === 'achievements' && <AchievementsPage onExit={() => navigate('home')} />}
       {route.page === 'stats' && <StatsPage onExit={() => navigate('home')} />}
       {route.page === 'settings' && <SettingsPage onExit={() => navigate('home')} onSettingsChange={applySettings} />}
+      {route.page === 'daily' && <DailyPage onExit={() => navigate('home')} onPlay={playDaily} />}
       {route.page === 'game' && <GameScreen config={route.config} options={route.options} />}
 
       <div className="toast-stack" aria-live="polite">

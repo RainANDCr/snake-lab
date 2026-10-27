@@ -70,6 +70,9 @@ function drawSnake(ctx: CanvasRenderingContext2D, state: GameState, snakeIndex: 
   const headColor = snake.alive ? snake.headColor : t.deadSnake
   const r = opts.pixelStyle ? 0 : Math.max(2, cell * 0.24)
   const inset = cell > 10 ? 1.5 : 0.5
+  // 幽灵形态：整条蛇半透明
+  const ghost = snake.alive && snake.ghostTicks > 0
+  if (ghost) ctx.globalAlpha = 0.45
   // 身体（尾到头绘制，头在最上层）
   for (let i = snake.body.length - 1; i >= 1; i--) {
     const p = snake.body[i]
@@ -113,8 +116,9 @@ function drawSnake(ctx: CanvasRenderingContext2D, state: GameState, snakeIndex: 
     ctx.globalAlpha = 0.85
     roundRectPath(ctx, hx - 1, hy - 1, cell + 2, cell + 2, r + 1)
     ctx.stroke()
-    ctx.globalAlpha = 1
+    ctx.globalAlpha = ghost ? 0.45 : 1
   }
+  if (ghost) ctx.globalAlpha = 1
 }
 
 export function drawGame(
@@ -198,22 +202,52 @@ export function drawGame(
     }
   }
 
-  // 食物（呼吸动画）
+  // 食物（呼吸动画）：普通/黄金为圆点，功能果为符号方块
   const breath = opts.reducedMotion ? 0 : Math.sin(timeMs / 300) * 0.5 + 0.5
+  const foodColors: Record<string, string> = {
+    normal: t.food,
+    golden: t.specialFood,
+    haste: '#f472b6',
+    shrink: '#22d3ee',
+    ghost: '#e2e8f0',
+  }
+  const foodGlyphs: Record<string, string> = { haste: '⚡', shrink: '✂', ghost: '👻' }
   for (const food of state.foods) {
     const cx = offsetX + food.position.x * cell + cell / 2
     const cy = offsetY + food.position.y * cell + cell / 2
-    const base = cell * (food.kind === 'special' ? 0.38 : 0.3)
-    const radius = base * (0.88 + breath * 0.24)
-    if (!opts.pixelStyle) {
-      ctx.shadowColor = food.kind === 'special' ? t.specialFood : t.foodGlow
-      ctx.shadowBlur = 8 + breath * 6
+    if (food.kind === 'normal' || food.kind === 'golden') {
+      const base = cell * (food.kind === 'golden' ? 0.38 : 0.3)
+      const radius = base * (0.88 + breath * 0.24)
+      if (!opts.pixelStyle) {
+        ctx.shadowColor = food.kind === 'golden' ? t.specialFood : t.foodGlow
+        ctx.shadowBlur = 8 + breath * 6
+      }
+      ctx.fillStyle = foodColors[food.kind]
+      ctx.beginPath()
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.shadowBlur = 0
+    } else {
+      const size = cell * (0.66 + breath * 0.08)
+      const x = cx - size / 2
+      const y = cy - size / 2
+      ctx.fillStyle = foodColors[food.kind] ?? '#fff'
+      ctx.globalAlpha = food.kind === 'ghost' ? 0.85 : 1
+      if (opts.pixelStyle) {
+        ctx.fillRect(x, y, size, size)
+      } else {
+        roundRectPath(ctx, x, y, size, size, Math.max(2, cell * 0.2))
+        ctx.fill()
+      }
+      ctx.globalAlpha = 1
+      if (cell >= 14) {
+        ctx.fillStyle = '#0b1020'
+        ctx.font = `bold ${Math.floor(cell * 0.42)}px system-ui, sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(foodGlyphs[food.kind] ?? '?', cx, cy + 1)
+      }
     }
-    ctx.fillStyle = food.kind === 'special' ? t.specialFood : t.food
-    ctx.beginPath()
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.shadowBlur = 0
   }
 
   // 道具

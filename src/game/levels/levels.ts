@@ -192,7 +192,7 @@ export function levelToConfig(def: LevelDef, difficulty: Difficulty): MatchConfi
     foodCount: 1,
     foodValue: 10,
     foodGrowth: 1,
-    specialFood: def.specialFood ? { chance: 0.15, value: 30, growth: 2 } : undefined,
+    foodRules: def.specialFood ? { goldenChance: 0.15, powerChance: 0.08 } : { goldenChance: 0.06, powerChance: 0 },
     tickMs: Math.round(def.tickMs * speedFactor),
     goal: { type: def.goal.type, value: def.goal.value },
     timeLimitMs: def.timeLimitSec ? def.timeLimitSec * 1000 : undefined,

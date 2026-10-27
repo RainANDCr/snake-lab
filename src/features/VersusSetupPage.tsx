@@ -19,10 +19,11 @@ const KINDS: { value: VersusKind; label: string; desc: string }[] = [
 
 const DURATIONS = [60, 120, 180]
 
-const AI_LEVELS: { value: 'bfs' | 'astar' | 'safe'; label: string }[] = [
+const AI_LEVELS: { value: 'bfs' | 'astar' | 'safe' | 'perfect'; label: string }[] = [
   { value: 'bfs', label: 'AI·BFS（基础）' },
   { value: 'astar', label: 'AI·A*（进阶）' },
   { value: 'safe', label: 'AI·安全策略（困难）' },
+  { value: 'perfect', label: 'AI·完美（地狱）' },
 ]
 
 export function VersusSetupPage({ onExit, onLaunch }: { onExit: () => void; onLaunch: (config: MatchConfig, options: GameScreenOptions) => void }) {
@@ -30,7 +31,7 @@ export function VersusSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
   const [duration, setDuration] = useState(120)
   const [powerups, setPowerups] = useState(false)
-  const [aiAlgorithm, setAiAlgorithm] = useState<'bfs' | 'astar' | 'safe'>('safe')
+  const [aiAlgorithm, setAiAlgorithm] = useState<'bfs' | 'astar' | 'safe' | 'perfect'>('safe')
   const [mapKey, setMapKey] = useState<string>('default')
   const [mapError, setMapError] = useState<string | null>(null)
 

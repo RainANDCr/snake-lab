@@ -180,6 +180,7 @@ button { font-family: inherit; }
 .card-pink .home-card-icon { color: #f472b6; }
 .card-blue .home-card-icon { color: #60a5fa; }
 .card-gray .home-card-icon { color: #94a3b8; }
+.card-red .home-card-icon { color: #f87171; }
 .home-footer { margin-top: 34px; color: var(--text-dim); font-size: 12.5px; }
 
 /* ---------- 设置页（单人/AI/对战通用结构） ---------- */
@@ -437,6 +438,30 @@ button { font-family: inherit; }
   from { opacity: 0; transform: translateX(24px); }
   to { opacity: 1; transform: none; }
 }
+
+/* ---------- 每日挑战 ---------- */
+.daily-card { display: flex; gap: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+.daily-preview { width: 200px; flex: none; }
+.daily-info { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 12px; }
+.daily-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tabular { font-variant-numeric: tabular-nums; }
+.daily-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 10px; }
+.daily-day { display: flex; flex-direction: column; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 4px; font-size: 12px; color: var(--text-dim); }
+.daily-day b { font-size: 15px; color: var(--text); }
+.daily-today { border-color: var(--accent); box-shadow: var(--glow); }
+.daily-today b { color: var(--accent); }
+
+/* ---------- Roguelike 战役 ---------- */
+.rogue-run-bar { display: flex; gap: 18px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 18px; margin-bottom: 16px; font-size: 14px; color: var(--text-dim); }
+.rogue-run-bar b { color: var(--warn); }
+.buff-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0 16px; }
+.buff-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 16px; cursor: pointer; color: var(--text); text-align: left; transition: transform 0.1s ease, border-color 0.15s ease, box-shadow 0.2s ease; }
+.buff-card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: var(--glow); }
+.buff-icon { font-size: 30px; }
+.buff-card b { font-size: 15px; }
+.buff-card small { color: var(--warn); margin-left: 4px; }
+.buff-card span:last-child { font-size: 12.5px; color: var(--text-dim); line-height: 1.6; }
+.rules-inline { border-radius: var(--radius); }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 900px) {

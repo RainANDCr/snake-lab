@@ -19,6 +19,9 @@ const RESULT_LABELS: Record<string, string> = {
   'versus-timed': '限时赛',
   'versus-ai': '人机',
   custom: '自定义',
+  daily: '每日挑战',
+  tournament: 'AI锦标赛',
+  campaign: '战役',
 }
 
 export function StatsPage({ onExit }: { onExit: () => void }) {

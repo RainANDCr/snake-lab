@@ -16,22 +16,36 @@ function notifyAchievements(unlocked: AchievementDef[]): void {
   }
 }
 
+/** 昨天的日期键（本地时区，YYYY-MM-DD） */
+function dateKeyOffset(offsetDays: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  return d.toLocaleDateString('sv')
+}
+
 /** 一局游戏结束（每局只上报一次，由 GameScreen 保证） */
 export function recordGameSummary(summary: GameSummary): void {
-  // 1. 统计
+  // 1. 统计（观赛局只进最近记录，不累计个人数据）
   const stats: StatsState = storage.loadStats()
-  stats.totalGames += 1
-  stats.totalFood += summary.foodEaten
-  stats.totalScore += summary.score
-  stats.playTimeMs += summary.durationMs
-  if (summary.manual && !summary.officialLevelId) {
-    const key = highScoreKey(summary.mode, summary.difficulty)
-    stats.highScores[key] = Math.max(stats.highScores[key] ?? 0, summary.score)
-  }
   stats.recent = [summary, ...stats.recent].slice(0, 10)
-  if (summary.versusResult === 'win') stats.versus.wins += 1
-  else if (summary.versusResult === 'draw') stats.versus.draws += 1
-  else if (summary.versusResult === 'loss') stats.versus.losses += 1
+  if (!summary.spectated) {
+    stats.totalGames += 1
+    stats.totalFood += summary.foodEaten
+    stats.totalScore += summary.score
+    stats.playTimeMs += summary.durationMs
+    if (
+      summary.manual &&
+      !summary.officialLevelId &&
+      summary.mode !== 'daily' &&
+      summary.mode !== 'campaign'
+    ) {
+      const key = highScoreKey(summary.mode, summary.difficulty)
+      stats.highScores[key] = Math.max(stats.highScores[key] ?? 0, summary.score)
+    }
+    if (summary.versusResult === 'win') stats.versus.wins += 1
+    else if (summary.versusResult === 'draw') stats.versus.draws += 1
+    else if (summary.versusResult === 'loss') stats.versus.losses += 1
+  }
   storage.saveStats(stats)
 
   // 2. 官方关卡进度（历史星级只升不降）
@@ -51,11 +65,37 @@ export function recordGameSummary(summary: GameSummary): void {
     }
   }
 
-  // 3. 成就
-  const ach = storage.loadAchievements()
-  const unlocked = applyGameSummary(ach, summary)
-  storage.saveAchievements(ach)
-  notifyAchievements(unlocked)
+  // 3. 每日挑战归档（连续天数）
+  if (summary.mode === 'daily' && summary.dailyDate && !summary.spectated) {
+    const daily = storage.loadDaily()
+    const prev = daily.days[summary.dailyDate]
+    daily.days[summary.dailyDate] = {
+      score: Math.max(prev?.score ?? 0, summary.score),
+      at: Date.now(),
+    }
+    if (daily.lastDate !== summary.dailyDate) {
+      daily.streak = daily.lastDate === dateKeyOffset(-1) ? daily.streak + 1 : 1
+      daily.lastDate = summary.dailyDate
+    }
+    storage.saveDaily(daily)
+  }
+
+  // 4. 战役归档
+  if (summary.mode === 'campaign' && !summary.spectated) {
+    const rogue = storage.loadRogue()
+    rogue.runs += 1
+    rogue.bestScore = Math.max(rogue.bestScore, summary.score)
+    rogue.bestStage = Math.max(rogue.bestStage, summary.campaignStage ?? 0)
+    storage.saveRogue(rogue)
+  }
+
+  // 5. 成就（观赛不计）
+  if (!summary.spectated) {
+    const ach = storage.loadAchievements()
+    const unlocked = applyGameSummary(ach, summary)
+    storage.saveAchievements(ach)
+    notifyAchievements(unlocked)
+  }
 }
 
 /** AI 控制事件（开局选择或游戏中切换到 AI） */

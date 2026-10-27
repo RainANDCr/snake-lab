@@ -15,9 +15,13 @@ import { Modal } from './Modal'
 import { VirtualDpad } from './VirtualDpad'
 
 export interface GameScreenOptions {
-  kind: 'single' | 'ai-lab' | 'versus' | 'level' | 'custom'
+  kind: 'single' | 'ai-lab' | 'versus' | 'level' | 'custom' | 'daily' | 'tournament' | 'campaign'
   onExit: () => void
   onNextLevel?: (clearedId: number) => void
+  /** 战役：当前关通关（带本关得分） */
+  onNextStage?: (clearedStage: number, stageScore: number) => void
+  /** 战役：失败后重新开始整场战役 */
+  onRestartCampaign?: () => void
 }
 
 interface SnakeHud {
@@ -110,7 +114,10 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
     return stats.highScores[`${config.mode}:${config.difficulty ?? 'normal'}`] ?? 0
   }, [config.mode, config.difficulty])
 
-  const isVersus = config.mode === 'versus' || config.mode === 'versus-timed' || config.mode === 'versus-ai'
+  const isVersus =
+    config.mode === 'versus' || config.mode === 'versus-timed' || config.mode === 'versus-ai' || config.mode === 'tournament'
+  const isSpectate = config.mode === 'tournament'
+  const isCampaign = options.kind === 'campaign'
   const isAiLab = options.kind === 'ai-lab'
   const levelDef = config.meta?.levelId != null ? getLevel(config.meta.levelId) : undefined
 
@@ -169,7 +176,8 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
       if (reportedRef.current) return
       reportedRef.current = true
       const s0 = state.snakes[0]
-      const isVersusMode = state.config.mode === 'versus' || state.config.mode === 'versus-timed' || state.config.mode === 'versus-ai'
+      const isVersusMode =
+        state.config.mode === 'versus' || state.config.mode === 'versus-timed' || state.config.mode === 'versus-ai'
       let versusResult: 'win' | 'draw' | 'loss' | undefined
       if (isVersusMode) {
         if (state.status === 'draw') versusResult = 'draw'
@@ -181,7 +189,7 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
         mode: state.config.mode,
         difficulty: state.config.difficulty ?? 'normal',
         manual: !anyAiRef.current,
-        score: s0.score,
+        score: isCampaign ? (state.config.meta?.campaignRunScore ?? 0) + s0.score : s0.score,
         foodEaten: s0.foodEaten,
         durationMs: state.elapsedMs,
         won: state.status === 'won',
@@ -191,12 +199,15 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
         stars,
         versusResult,
         controller: s0.controller,
+        spectated: isSpectate,
+        dailyDate: state.config.meta?.dailyDate,
+        campaignStage: isCampaign ? (state.config.meta?.campaignStage ?? 1) : undefined,
         at: Date.now(),
       })
       if (state.status === 'won') audio.win()
       else audio.gameOver()
     },
-    [levelDef],
+    [isCampaign, isSpectate, levelDef],
   )
 
   const runTick = useCallback(() => {
@@ -204,7 +215,14 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
     for (const snake of before.snakes) {
       if (!snake.alive) continue
       if (snake.controller !== 'human') {
-        const algo: Algorithm = snake.controller === 'bfs' ? 'bfs' : snake.controller === 'astar' ? 'astar' : 'safe'
+        const algo: Algorithm =
+          snake.controller === 'bfs'
+            ? 'bfs'
+            : snake.controller === 'astar'
+              ? 'astar'
+              : snake.controller === 'perfect'
+                ? 'perfect'
+                : 'safe'
         const decision = aiDecide(before, snake.id, algo)
         if (snake.id === 'p1' && isAiLab) {
           vizRef.current = decision.viz
@@ -403,6 +421,7 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
   const routeDirection = useCallback(
     (dir: Direction, keyIsP1: boolean) => {
       if (statusRef.current !== 'playing') return
+      if (config.mode === 'tournament') return // 观赛局不接收人工输入
       if (isVersus) {
         setDirection(stateRef.current, keyIsP1 ? 'p1' : 'p2', dir)
       } else {
@@ -410,7 +429,7 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
         setDirection(stateRef.current, 'p1', dir)
       }
     },
-    [isAiLab, isVersus],
+    [config.mode, isAiLab, isVersus],
   )
 
   useEffect(() => {
@@ -518,10 +537,24 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
   }, [config.goal, config.foodValue, hud.elapsedMs, s0?.score])
 
   const stars = levelDef && status === 'won' ? starsForScore(levelDef, s0?.score ?? 0) : 0
-  const resultTitle = status === 'won' ? (isVersus ? '胜利！' : '通关成功！') : status === 'lost' ? '游戏结束' : '平局'
+  const resultTitle =
+    status === 'won'
+      ? isSpectate
+        ? '冠军诞生！'
+        : isCampaign
+          ? `第 ${config.meta?.campaignStage ?? '?'} 关完成！`
+          : isVersus
+            ? '胜利！'
+            : '通关成功！'
+      : status === 'lost'
+        ? isCampaign
+          ? '战役终结'
+          : '游戏结束'
+        : '平局'
   const resultReason = RESULT_TEXT[stateRef.current.result?.reason ?? 'died'] ?? (stateRef.current.result?.reason === 'died' ? '本局结束' : '')
   const versusWinner = stateRef.current.result?.winnerIds ?? []
   const hasNextLevel = options.kind === 'level' && levelDef != null && levelDef.id < 15 && status === 'won'
+  const rulesText = config.meta?.rules ?? VERSUS_RULES
 
   return (
     <div className="page game-page">
@@ -545,9 +578,9 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
 
       {showRules && isVersus && (
         <div className="rules-panel">
-          <h4>对战规则说明</h4>
+          <h4>规则说明</h4>
           <ul>
-            {VERSUS_RULES.map((r) => (
+            {rulesText.map((r) => (
               <li key={r}>{r}</li>
             ))}
           </ul>
@@ -584,6 +617,7 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
           <div className="score-meta">
             <span>{speedTilesPerSec} 格/秒</span>
             {speedNextGap != null && <span className="buff buff-speed">再得 {speedNextGap} 分提速</span>}
+            {isCampaign && <span className="buff">💰 战役累计 {config.meta?.campaignRunScore ?? 0} 分</span>}
             {timeLeft != null && (
               <span className={timeLeft < 10000 ? 'time-danger' : ''}>⏱ {formatMs(timeLeft)}</span>
             )}
@@ -637,7 +671,7 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
             <section className="panel-card">
               <h4>控制方式</h4>
               <div className="chip-group">
-                {([['human', '手动'], ['bfs', 'BFS'], ['astar', 'A*'], ['safe', '安全策略']] as [ControllerKind, string][]).map(([value, label]) => (
+                {([['human', '手动'], ['bfs', 'BFS'], ['astar', 'A*'], ['safe', '安全策略'], ['perfect', '完美']] as [ControllerKind, string][]).map(([value, label]) => (
                   <button key={value} className={`chip ${controller === value ? 'chip-active' : ''}`} onClick={() => switchController(value)}>
                     {label}
                   </button>
@@ -753,20 +787,35 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
         actions={
           <>
             <button className="btn btn-ghost" onClick={options.onExit}>
-              返回菜单
+              {isCampaign && status === 'won' ? '放弃战役' : '返回菜单'}
             </button>
-            <button className="btn btn-secondary" onClick={restartGame}>
-              再来一局
-            </button>
-            {hasNextLevel && (
+            {isCampaign && status === 'won' && options.onNextStage ? (
               <button
                 className="btn btn-primary"
-                onClick={() => {
-                  if (options.onNextLevel && levelDef) options.onNextLevel(levelDef.id)
-                }}
+                onClick={() => options.onNextStage?.(config.meta?.campaignStage ?? 1, s0?.score ?? 0)}
               >
-                下一关 →
+                选择增益 →
               </button>
+            ) : isCampaign && status !== 'won' && options.onRestartCampaign ? (
+              <button className="btn btn-primary" onClick={options.onRestartCampaign}>
+                重振旗鼓（重新开始）
+              </button>
+            ) : (
+              <>
+                <button className="btn btn-secondary" onClick={restartGame}>
+                  再来一局
+                </button>
+                {hasNextLevel && (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => {
+                      if (options.onNextLevel && levelDef) options.onNextLevel(levelDef.id)
+                    }}
+                  >
+                    下一关 →
+                  </button>
+                )}
+              </>
             )}
           </>
         }
