@@ -26,10 +26,10 @@ export function SingleSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
   const [mapKey, setMapKey] = useState<string>('default')
 
-  // 无尽穿墙模式不提供默认空场地，须选择预设或自定义地图
+  // 无尽穿墙模式不提供空旷场地（默认场地与空旷平原），须选择有障碍的预设或自定义地图
   const changeMode = (next: Extract<GameMode, 'classic' | 'endless' | 'speed'>): void => {
     setMode(next)
-    if (next === 'endless' && mapKey === 'default') setMapKey('preset:empty')
+    if (next === 'endless' && (mapKey === 'default' || mapKey === 'preset:empty')) setMapKey('preset:cross')
   }
 
   const userMaps = useMemo(() => storage.loadMaps(), [mapKey])
@@ -96,7 +96,7 @@ export function SingleSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
               <span>默认场地</span>
             </label>
           )}
-          {PRESET_MAPS.map((p) => {
+          {PRESET_MAPS.filter((p) => mode !== 'endless' || p.key !== 'empty').map((p) => {
             const map = buildPreset(p.key)!
             return (
               <label key={p.key} className={`map-item ${mapKey === `preset:${p.key}` ? 'map-active' : ''}`}>
