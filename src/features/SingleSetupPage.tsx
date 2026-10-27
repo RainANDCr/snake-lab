@@ -26,6 +26,12 @@ export function SingleSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
   const [difficulty, setDifficulty] = useState<Difficulty>('normal')
   const [mapKey, setMapKey] = useState<string>('default')
 
+  // 无尽穿墙模式不提供默认空场地，须选择预设或自定义地图
+  const changeMode = (next: Extract<GameMode, 'classic' | 'endless' | 'speed'>): void => {
+    setMode(next)
+    if (next === 'endless' && mapKey === 'default') setMapKey('preset:empty')
+  }
+
   const userMaps = useMemo(() => storage.loadMaps(), [mapKey])
   const selectedMap: MapData | null = useMemo(() => {
     if (mapKey === 'default') return null
@@ -61,7 +67,7 @@ export function SingleSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
         <h3>选择模式</h3>
         <div className="option-cards">
           {MODES.map((m) => (
-            <button key={m.value} className={`option-card ${mode === m.value ? 'option-active' : ''}`} onClick={() => setMode(m.value as Extract<GameMode, 'classic' | 'endless' | 'speed'>)}>
+            <button key={m.value} className={`option-card ${mode === m.value ? 'option-active' : ''}`} onClick={() => changeMode(m.value as Extract<GameMode, 'classic' | 'endless' | 'speed'>)}>
               <b>{m.label}</b>
               <span>{m.desc}</span>
             </button>
@@ -83,11 +89,13 @@ export function SingleSetupPage({ onExit, onLaunch }: { onExit: () => void; onLa
       <section className="setup-section">
         <h3>场地</h3>
         <div className="map-picker">
-          <label className={`map-item ${mapKey === 'default' ? 'map-active' : ''}`}>
-            <input type="radio" name="map" checked={mapKey === 'default'} onChange={() => setMapKey('default')} />
-            <BoardPreview map={{ width: 24, height: 24, walls: [], spawns: {} }} />
-            <span>默认场地</span>
-          </label>
+          {mode !== 'endless' && (
+            <label className={`map-item ${mapKey === 'default' ? 'map-active' : ''}`}>
+              <input type="radio" name="map" checked={mapKey === 'default'} onChange={() => setMapKey('default')} />
+              <BoardPreview map={{ width: 24, height: 24, walls: [], spawns: {} }} />
+              <span>默认场地</span>
+            </label>
+          )}
           {PRESET_MAPS.map((p) => {
             const map = buildPreset(p.key)!
             return (

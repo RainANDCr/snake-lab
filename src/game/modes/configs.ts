@@ -1,9 +1,12 @@
 /**
  * 模式配置构建器：把 UI 选择（模式/难度/地图/对战选项）转换为统一 MatchConfig。
  * 所有模式共用同一引擎，只在这里产生不同配置。
+ *
+ * 出生点策略：随机选择「身后有容身格 + 面向方向有足够安全跑道」的候选点，
+ * 保证玩家开局至少有约 1 秒的反应时间，不会贴墙秒死。
  */
-import { ControllerKind, Difficulty, Direction, GameMode, MatchConfig, Position } from '../core/types'
-import { MapData, wallKeySet } from '../maps/validation'
+import { ControllerKind, DIR_VECTORS, Difficulty, Direction, GameMode, MatchConfig, Position } from '../core/types'
+import { MapData } from '../maps/validation'
 import { clonePreset } from '../maps/presets'
 
 export const SNAKE_P1_COLOR = '#22d3ee'
@@ -15,21 +18,120 @@ export const SNAKE_AI_HEAD = '#ddd6fe'
 
 const DIFFICULTY_TICK: Record<Difficulty, number> = { easy: 150, normal: 120, hard: 95 }
 
-/** 在地图上找一个安全的出生点（头 + 身后两格均空闲），找不返回中心附近 */
-export function findSafeSpawn(walls: Position[], width: number, height: number, prefer?: Position): { spawn: Position; direction: Direction } {
+const DIR_LIST: Direction[] = ['up', 'right', 'down', 'left']
+
+function isFree(blocked: Set<string>, width: number, height: number, wrap: boolean, x: number, y: number): boolean {
+  let nx = x
+  let ny = y
+  if (wrap) {
+    nx = ((x % width) + width) % width
+    ny = ((y % height) + height) % height
+  } else if (x < 0 || y < 0 || x >= width || y >= height) {
+    return false
+  }
+  return !blocked.has(`${nx},${ny}`)
+}
+
+export interface SpawnCandidate {
+  spawn: Position
+  direction: Direction
+}
+
+/** 收集全部安全出生候选：头与身后 length-1 格空闲，且面向方向至少 runway 格畅通 */
+export function collectSpawnCandidates(
+  walls: Position[],
+  width: number,
+  height: number,
+  wrap: boolean,
+  snakeLength: number,
+  runway: number,
+): SpawnCandidate[] {
   const blocked = new Set(walls.map((w) => `${w.x},${w.y}`))
-  const free = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < width && y < height && !blocked.has(`${x},${y}`)
-  const candidate = (x: number, y: number): boolean => free(x, y) && free(x - 1, y) && free(x - 2, y) && free(x + 1, y)
-  if (prefer && candidate(prefer.x, prefer.y)) return { spawn: prefer, direction: 'right' }
-  const midY = Math.floor(height / 2)
-  for (let dy = 0; dy < height; dy++) {
-    const y = dy % 2 === 0 ? midY + dy / 2 : midY - (dy + 1) / 2
-    if (y < 0 || y >= height) continue
-    for (let x = 2; x < width - 1; x++) {
-      if (candidate(x, y)) return { spawn: { x, y }, direction: 'right' }
+  const out: SpawnCandidate[] = []
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      for (const dir of DIR_LIST) {
+        const v = DIR_VECTORS[dir]
+        let ok = isFree(blocked, width, height, wrap, x, y) // 头部格子本身必须空闲
+        // 身后容身格（body 从 spawn 向后延伸 length-1 格）
+        for (let i = 1; i < snakeLength && ok; i++) {
+          if (!isFree(blocked, width, height, wrap, x - v.x * i, y - v.y * i)) ok = false
+        }
+        // 面向方向的安全跑道
+        for (let i = 1; i <= runway && ok; i++) {
+          if (!isFree(blocked, width, height, wrap, x + v.x * i, y + v.y * i)) ok = false
+        }
+        if (ok) out.push({ spawn: { x, y }, direction: dir })
+      }
     }
   }
-  return { spawn: { x: Math.floor(width / 2), y: midY }, direction: 'right' }
+  return out
+}
+
+/** 随机挑选安全出生点；找不到满跑道的逐级放宽跑道要求（8 → 6 → 4 → 2） */
+export function pickRandomSpawn(
+  walls: Position[],
+  width: number,
+  height: number,
+  wrap: boolean,
+  snakeLength: number,
+  minRunway = 8,
+): SpawnCandidate {
+  for (const runway of [minRunway, 6, 4, 2]) {
+    const candidates = collectSpawnCandidates(walls, width, height, wrap, snakeLength, runway)
+    if (candidates.length > 0) {
+      return candidates[Math.floor(Math.random() * candidates.length) % candidates.length]
+    }
+  }
+  // 兜底：中心（仅在图几乎被墙填满时出现）
+  return { spawn: { x: Math.floor(width / 2), y: Math.floor(height / 2) }, direction: 'right' }
+}
+
+/** 每行取一个左右两侧都有跑道的对称候选（对战用，保证公平） */
+function pickRandomVersusSpawns(
+  walls: Position[],
+  width: number,
+  height: number,
+  snakeLength: number,
+  minRunway: number,
+): { p1: Position; p2: Position } | null {
+  const blocked = new Set(walls.map((w) => `${w.x},${w.y}`))
+  const rows: number[] = []
+  for (let y = 0; y < height; y++) {
+    for (let x = 2; x < Math.floor(width / 2); x++) {
+      const px2 = width - 1 - x
+      let ok = isFree(blocked, width, height, false, x, y) && isFree(blocked, width, height, false, px2, y)
+      for (let i = 1; i < snakeLength && ok; i++) {
+        ok = isFree(blocked, width, height, false, x - i, y) && isFree(blocked, width, height, false, px2 + i, y)
+      }
+      let run1 = 0
+      let run2 = 0
+      while (ok && run1 < minRunway && isFree(blocked, width, height, false, x + 1 + run1, y)) run1 += 1
+      while (ok && run2 < minRunway && isFree(blocked, width, height, false, px2 - 1 - run2, y)) run2 += 1
+      if (ok && run1 >= minRunway && run2 >= minRunway) {
+        rows.push(y)
+        break // 本行已找到最左候选，换下一行
+      }
+    }
+  }
+  if (rows.length === 0) return null
+  const y = rows[Math.floor(Math.random() * rows.length) % rows.length]
+  // 在该行再次扫描取一个随机 x（保持对称）
+  const xs: number[] = []
+  for (let x = 2; x < Math.floor(width / 2); x++) {
+    const px2 = width - 1 - x
+    let ok = isFree(blocked, width, height, false, x, y) && isFree(blocked, width, height, false, px2, y)
+    for (let i = 1; i < snakeLength && ok; i++) {
+      ok = isFree(blocked, width, height, false, x - i, y) && isFree(blocked, width, height, false, px2 + i, y)
+    }
+    let run1 = 0
+    let run2 = 0
+    while (ok && run1 < minRunway && isFree(blocked, width, height, false, x + 1 + run1, y)) run1 += 1
+    while (ok && run2 < minRunway && isFree(blocked, width, height, false, px2 - 1 - run2, y)) run2 += 1
+    if (ok && run1 >= minRunway && run2 >= minRunway) xs.push(x)
+  }
+  const x = xs[Math.floor(Math.random() * xs.length) % xs.length]
+  return { p1: { x, y }, p2: { x: width - 1 - x, y } }
 }
 
 export interface SingleSetupOptions {
@@ -50,8 +152,7 @@ export function buildSingleConfig(opts: SingleSetupOptions): MatchConfig {
       : undefined
   if (mode === 'speed') tickMs = Math.round(tickMs * 0.8)
   const wrap = mode === 'endless' || (map?.wrap ?? false)
-  const prefer = map?.spawns?.single
-  const { spawn, direction } = prefer ? { spawn: prefer, direction: 'right' as Direction } : findSafeSpawn(walls, width, height)
+  const { spawn, direction } = pickRandomSpawn(walls, width, height, wrap, 3, 8)
   const labels: Record<string, string> = { classic: '经典模式', endless: '无尽穿墙', speed: '极速模式' }
   return {
     mode,
@@ -100,6 +201,7 @@ export const VERSUS_RULES: string[] = [
   '限时赛：时间到按得分判定，同分为平局',
   '死亡后的蛇身将冻结为障碍物',
   '护盾可抵挡一次致命碰撞，触发后停留在原位',
+  '出生位置每局随机，但双方始终左右对称、跑道等长',
 ]
 
 export function buildVersusConfig(opts: VersusSetupOptions): MatchConfig {
@@ -109,8 +211,10 @@ export function buildVersusConfig(opts: VersusSetupOptions): MatchConfig {
   const walls = map ? map.walls : []
   const tickMs = DIFFICULTY_TICK[difficulty]
   const midY = Math.floor(height / 2)
-  const p1Spawn = map?.spawns?.p1 ?? { x: 4, y: midY }
-  const p2Spawn = map?.spawns?.p2 ?? { x: width - 5, y: midY }
+  // 随机对称出生：每局换行换位置，双方跑道等长
+  const randomSpawns = pickRandomVersusSpawns(walls, width, height, 3, 6)
+  const p1Spawn = randomSpawns?.p1 ?? { x: 4, y: midY }
+  const p2Spawn = randomSpawns?.p2 ?? { x: width - 5, y: midY }
   const p2Controller: ControllerKind = kind === 'ai' ? (opts.aiAlgorithm ?? 'safe') : 'human'
   const mode: GameMode = kind === 'classic' ? 'versus' : kind === 'timed' ? 'versus-timed' : 'versus-ai'
   return {
@@ -169,14 +273,13 @@ export function buildAiLabConfig(opts: AiLabOptions): MatchConfig {
   const width = map?.width ?? 24
   const height = map?.height ?? 24
   const walls = map ? map.walls : []
-  const { spawn, direction } = map?.spawns?.single
-    ? { spawn: map.spawns.single, direction: 'right' as Direction }
-    : findSafeSpawn(walls, width, height)
+  const wrap = map?.wrap ?? false
+  const { spawn, direction } = pickRandomSpawn(walls, width, height, wrap, 4, 8)
   return {
     mode: 'custom',
     width,
     height,
-    wrap: map?.wrap ?? false,
+    wrap,
     walls,
     snakes: [
       {
@@ -214,14 +317,16 @@ export function buildCustomConfig(map: MapData, difficulty: Difficulty, goal?: {
 
 /** 检查地图在指定模式下是否可玩（出生点/空间校验） */
 export function mapPlayable(map: MapData, versus: boolean): { ok: boolean; error?: string } {
-  const walls = wallKeySet(map)
+  const walls = new Set(map.walls.map((w) => `${w.x},${w.y}`))
   if (versus) {
-    if (!map.spawns.p1 || !map.spawns.p2) return { ok: false, error: '该地图未设置双人出生点' }
-    if (walls.has(`${map.spawns.p1.x},${map.spawns.p1.y}`) || walls.has(`${map.spawns.p2.x},${map.spawns.p2.y}`)) {
-      return { ok: false, error: '双人出生点位于障碍物上' }
-    }
-  } else if (map.spawns.single && walls.has(`${map.spawns.single.x},${map.spawns.single.y}`)) {
-    return { ok: false, error: '出生点位于障碍物上' }
+    const freeCells = map.width * map.height - walls.size
+    if (freeCells < 30) return { ok: false, error: '该地图空闲空间过小，不适合对战' }
+    // 随机对称出生要求至少存在一行左右通道
+    const candidates = collectSpawnCandidates(map.walls, map.width, map.height, map.wrap, 3, 2)
+    if (candidates.length < 2) return { ok: false, error: '该地图没有足够的出生空间' }
+  } else {
+    const candidates = collectSpawnCandidates(map.walls, map.width, map.height, map.wrap, 3, 2)
+    if (candidates.length === 0) return { ok: false, error: '该地图没有足够的出生空间' }
   }
   return { ok: true }
 }

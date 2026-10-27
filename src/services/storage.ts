@@ -9,16 +9,20 @@ import { MatchConfig } from '../game/core/types'
 
 const PREFIX = 'snakelab'
 
+export type ThemeMode = 'auto' | 'dark' | 'light' | 'manual'
+
 export interface Settings {
   version: number
   theme: 'neon' | 'light' | 'pixel'
+  /** 主题模式：auto 跟随系统深浅色；dark/light 固定；manual 使用 theme 字段（如经典像素） */
+  themeMode: ThemeMode
   sound: boolean
   volume: number
   virtualDpad: boolean
 }
 
 export function defaultSettings(): Settings {
-  return { version: 1, theme: 'neon', sound: true, volume: 0.5, virtualDpad: false }
+  return { version: 1, theme: 'neon', themeMode: 'auto', sound: true, volume: 0.5, virtualDpad: false }
 }
 
 export interface StatsState {
@@ -113,6 +117,22 @@ function isSettings(d: unknown): d is Settings {
   const s = d as Settings
   return typeof s === 'object' && s !== null && ['neon', 'light', 'pixel'].includes(s.theme) && typeof s.sound === 'boolean'
 }
+
+const SETTINGS_KEY = `${PREFIX}.settings.v1`
+
+/** 读取设置；旧档缺 themeMode 字段时迁移为 manual（尊重已保存的主题选择） */
+function loadSettingsInternal(): Settings {
+  let raw: string | null = null
+  try {
+    raw = localStorage.getItem(SETTINGS_KEY)
+  } catch {
+    raw = null
+  }
+  if (raw == null) return defaultSettings()
+  const s = readStored<Settings>('settings.v1', 1, defaultSettings(), isSettings, {})
+  const hadMode = typeof raw === 'string' && raw.includes('"themeMode"')
+  return { ...defaultSettings(), ...s, themeMode: hadMode ? (s.themeMode ?? 'manual') : 'manual' }
+}
 function isStats(d: unknown): d is StatsState {
   const s = d as StatsState
   return typeof s === 'object' && s !== null && typeof s.totalGames === 'number' && Array.isArray(s.recent) && typeof s.versus === 'object'
@@ -134,7 +154,7 @@ function isCustomLevels(d: unknown): d is CustomLevelDef[] {
 
 export const storage = {
   loadSettings(): Settings {
-    return readStored<Settings>('settings.v1', 1, defaultSettings(), isSettings, {})
+    return loadSettingsInternal()
   },
   saveSettings(s: Settings): boolean {
     return writeStored('settings.v1', 1, { ...s, version: 1 })
@@ -211,7 +231,7 @@ export const storage = {
       if (save(value as T)) restored.push(name)
       else errors.push(`${name} 写入失败`)
     }
-    tryRestore('设置', data.settings, (v: Settings) => this.saveSettings({ ...defaultSettings(), ...v }))
+    tryRestore('设置', data.settings, (v: Settings) => this.saveSettings({ ...defaultSettings(), ...v, themeMode: v.themeMode ?? 'manual' }))
     tryRestore('统计', data.stats, (v: StatsState) => this.saveStats({ ...defaultStats(), ...v }))
     tryRestore('成就', data.achievements, (v: AchievementsState) => this.saveAchievements({ ...defaultAchievementsState(), ...v }))
     tryRestore('关卡进度', data.levelProgress, (v: LevelProgressState) => this.saveLevelProgress({ ...defaultLevelProgress(), ...v }))

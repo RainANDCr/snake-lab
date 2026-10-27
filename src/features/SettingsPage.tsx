@@ -1,26 +1,33 @@
 import { useRef, useState } from 'react'
 import { ArrowLeft, Download, Settings as SettingsIcon, Trash2, Upload } from 'lucide-react'
-import { ThemeName, THEME_COLORS } from '../styles/themes'
-import { storage } from '../services/storage'
+import { THEME_COLORS } from '../styles/themes'
+import { Settings, storage } from '../services/storage'
 import { uiBus } from '../services/uiBus'
 import { audio } from '../services/audio'
 import { ConfirmModal } from '../components/Modal'
 
-const THEME_CARDS: { value: ThemeName; label: string; desc: string }[] = [
+const THEME_CARDS: { value: Settings['theme']; label: string; desc: string }[] = [
   { value: 'neon', label: '霓虹科技', desc: '深蓝底 + 霓虹绿光（默认）' },
   { value: 'light', label: '极简浅色', desc: '清爽明亮的白天模式' },
   { value: 'pixel', label: '经典像素', desc: '复古街机像素风' },
 ]
 
-export function SettingsPage({ onExit, onThemeChange }: { onExit: () => void; onThemeChange: (t: ThemeName) => void }) {
+const THEME_MODES: { value: Settings['themeMode']; label: string; desc: string }[] = [
+  { value: 'auto', label: '跟随系统', desc: '自动切换深浅色' },
+  { value: 'dark', label: '深色', desc: '固定霓虹科技' },
+  { value: 'light', label: '浅色', desc: '固定极简浅色' },
+]
+
+export function SettingsPage({ onExit, onSettingsChange }: { onExit: () => void; onSettingsChange: (s: Settings) => void }) {
   const [settings, setSettings] = useState(() => storage.loadSettings())
   const [confirmReset, setConfirmReset] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
-  const update = (patch: Partial<typeof settings>): void => {
+  const update = (patch: Partial<Settings>): void => {
     const next = { ...settings, ...patch }
     setSettings(next)
     storage.saveSettings(next)
+    onSettingsChange(next)
   }
 
   const exportBackup = (): void => {
@@ -40,8 +47,9 @@ export function SettingsPage({ onExit, onThemeChange }: { onExit: () => void; on
       const result = storage.importAll(text)
       if (result.ok) {
         uiBus.push({ title: '恢复完成', message: `已恢复：${result.restored.join('、')}`, kind: 'info' })
-        setSettings(storage.loadSettings())
-        onThemeChange(storage.loadSettings().theme)
+        const restored = storage.loadSettings()
+        setSettings(restored)
+        onSettingsChange(restored)
       } else {
         uiBus.push({ title: '恢复失败', message: result.errors.join('；'), kind: 'error' })
       }
@@ -69,10 +77,27 @@ export function SettingsPage({ onExit, onThemeChange }: { onExit: () => void; on
       </header>
 
       <section className="setup-section">
-        <h3>主题</h3>
+        <h3>主题模式</h3>
+        <div className="chip-group">
+          {THEME_MODES.map((m) => (
+            <button
+              key={m.value}
+              className={`chip ${settings.themeMode === m.value ? 'chip-active' : ''}`}
+              title={m.desc}
+              onClick={() => update({ themeMode: m.value, theme: m.value === 'dark' ? 'neon' : m.value === 'light' ? 'light' : settings.theme })}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <p className="panel-note">「跟随系统」自动切换深浅色；也可用页面右上角的快捷按钮随时切换。</p>
+      </section>
+
+      <section className="setup-section">
+        <h3>主题外观</h3>
         <div className="theme-cards">
           {THEME_CARDS.map((t) => (
-            <button key={t.value} className={`theme-card ${settings.theme === t.value ? 'option-active' : ''}`} onClick={() => { update({ theme: t.value }); onThemeChange(t.value); audio.click() }}>
+            <button key={t.value} className={`theme-card ${settings.theme === t.value ? 'option-active' : ''}`} onClick={() => { update({ theme: t.value, themeMode: 'manual' }); audio.click() }}>
               <span className="theme-swatch" style={{ background: THEME_COLORS[t.value].boardBg, borderColor: THEME_COLORS[t.value].snakeBody }}>
                 <i style={{ background: THEME_COLORS[t.value].snakeBody }} />
                 <i style={{ background: THEME_COLORS[t.value].food }} />

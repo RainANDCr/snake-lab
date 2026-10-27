@@ -87,7 +87,8 @@ function formatMs(ms: number): string {
 }
 
 export function GameScreen({ config, options }: { config: MatchConfig; options: GameScreenOptions }) {
-  const themeName: ThemeName = storage.loadSettings().theme
+  // 主题由 App 解析（含跟随系统）后写入 data-theme，这里直接读取最终生效主题
+  const themeName = (document.documentElement.dataset.theme as ThemeName | undefined) ?? 'neon'
   const theme = THEME_COLORS[themeName]
   const settings = storage.loadSettings()
   const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, [])
@@ -499,6 +500,15 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
   const s0 = hud.scores[0]
   const timeLeft = config.timeLimitMs != null ? config.timeLimitMs - hud.elapsedMs : null
   const speedTilesPerSec = (1000 / hud.effectiveTickMs).toFixed(1)
+  // 极速等级：随积分阶梯实时提升（每达到 everyScore 分升一级）
+  const speedLevel =
+    config.mode === 'speed' && config.speedRamp
+      ? Math.floor((s0?.score ?? 0) / config.speedRamp.everyScore) + 1
+      : null
+  const speedNextGap =
+    speedLevel != null && config.speedRamp
+      ? config.speedRamp.everyScore - ((s0?.score ?? 0) % config.speedRamp.everyScore)
+      : null
   const goalProgress = useMemo(() => {
     const g = config.goal
     if (g.type === 'score') return { label: '目标分数', current: s0?.score ?? 0, target: g.value ?? 0 }
@@ -569,13 +579,14 @@ export function GameScreen({ config, options }: { config: MatchConfig; options: 
           <div className="score-name">状态</div>
           <div className="score-value">
             {status === 'playing' ? '进行中' : status === 'ready' ? '准备' : status === 'countdown' ? '倒计时' : status === 'paused' ? '已暂停' : status === 'won' ? '胜利' : status === 'lost' ? '失败' : '平局'}
+            {speedLevel != null && <span className="speed-badge">⚡ 极速 Lv.{speedLevel}</span>}
           </div>
           <div className="score-meta">
             <span>{speedTilesPerSec} 格/秒</span>
+            {speedNextGap != null && <span className="buff buff-speed">再得 {speedNextGap} 分提速</span>}
             {timeLeft != null && (
               <span className={timeLeft < 10000 ? 'time-danger' : ''}>⏱ {formatMs(timeLeft)}</span>
             )}
-            {config.mode === 'speed' && <span className="buff buff-speed">极速 Lv.{Math.max(1, Math.floor(((config.tickMs - hud.effectiveTickMs) / Math.max(1, config.speedRamp?.decreaseMs ?? 1)) + 1))}</span>}
           </div>
         </div>
       </div>

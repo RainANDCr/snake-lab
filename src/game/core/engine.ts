@@ -36,26 +36,36 @@ export function createSnakeBody(spawn: Position, direction: Direction, length: n
 }
 
 export function createInitialState(config: MatchConfig): GameState {
-  const snakes: SnakeState[] = config.snakes.map((init) => ({
-    id: init.id,
-    name: init.name,
-    color: init.color,
-    headColor: init.headColor ?? init.color,
-    body: createSnakeBody(init.spawn, init.direction, init.length),
-    direction: init.direction,
-    queue: [],
-    pendingGrowth: 0,
-    alive: true,
-    score: 0,
-    foodEaten: 0,
-    controller: init.controller,
-    shield: 0,
-    speedMult: 1,
-    speedTicks: 0,
-    scoreMult: 1,
-    scoreTicks: 0,
-    accumulator: 1,
-  }))
+  const snakes: SnakeState[] = config.snakes.map((init) => {
+    const body = createSnakeBody(init.spawn, init.direction, init.length)
+    if (config.wrap) {
+      // 穿墙模式：出生身体向后延伸可能越过边界，回绕到场内坐标
+      for (const p of body) {
+        p.x = ((p.x % config.width) + config.width) % config.width
+        p.y = ((p.y % config.height) + config.height) % config.height
+      }
+    }
+    return {
+      id: init.id,
+      name: init.name,
+      color: init.color,
+      headColor: init.headColor ?? init.color,
+      body,
+      direction: init.direction,
+      queue: [],
+      pendingGrowth: 0,
+      alive: true,
+      score: 0,
+      foodEaten: 0,
+      controller: init.controller,
+      shield: 0,
+      speedMult: 1,
+      speedTicks: 0,
+      scoreMult: 1,
+      scoreTicks: 0,
+      accumulator: 1,
+    }
+  })
   const state: GameState = {
     config,
     wallSet: new Set(config.walls.map(keyOf)),
